@@ -481,6 +481,7 @@ class generic_potential():
         """
         if X is None:
             X = self.approxZeroTMin()[0]
+        return optimize.minimize(self.Vtot, X, args=(T,), method='L-BFGS-B', jac=self.gradV, options={'maxiter':20000, 'maxcor':20, 'gtol':1e-9})['x']
         return optimize.fmin(self.Vtot, X, args=(T,), disp=0)
 
     def findT0(self):
@@ -554,12 +555,12 @@ class generic_potential():
         tracingArgs_ = dict(forbidCrit=self.forbidPhaseCrit)
         tracingArgs_.update(tracingArgs)
         phases = transitionFinder.traceMultiMin(
-            self.Vtot, self.dgradV_dT, self.d2V, points,
+            self.Vtot, self.gradV, self.dgradV_dT, self.d2V, points,
             tLow=0.0, tHigh=tstop, deltaX_target=100*self.x_eps,
             **tracingArgs_)
         self.phases = phases
         transitionFinder.removeRedundantPhases(
-            self.Vtot, phases, self.x_eps*1e-2, self.x_eps*10)
+            self.Vtot, self.gradV, phases, self.x_eps*1e-2, self.x_eps*10)
         return self.phases
 
     def calcTcTrans(self, startHigh=False):

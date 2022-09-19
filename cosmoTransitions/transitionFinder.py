@@ -31,9 +31,9 @@ if sys.version_info >= (3,0):
 
 
 _traceMinimum_rval = namedtuple("traceMinimum_rval", "X T dXdT overX overT")
-def traceMinimum(f, d2f_dxdt, d2f_dx2, x0, t0, tstop, dtstart, deltaX_target,
+def traceMinimum(f, df_dx, d2f_dxdt, d2f_dx2, x0, t0, tstop, dtstart, deltaX_target,
                  dtabsMax=20.0, dtfracMax=.25, dtmin=1e-3,
-                 deltaX_tol=1.2, minratio=1e-2):
+                 deltaX_tol=1.2, minratio=1e-5):
     """
     Trace the minimum `xmin(t)` of the function `f(x,t)`, starting at `x0, t0`.
 
@@ -111,13 +111,20 @@ def traceMinimum(f, d2f_dxdt, d2f_dx2, x0, t0, tstop, dtstart, deltaX_target,
         M = d2f_dx2(x,t)
         if abs(linalg.det(M)) < (1e-3*np.max(abs(M)))**Ndim:
             # Assume matrix is singular
+            print(abs(linalg.det(M)))
             return None, False
         b = -d2f_dxdt(x,t)
         eigs = linalg.eigvalsh(M)
         try:
             dxdt = linalg.solve(M,b, overwrite_a=False, overwrite_b=False)
             # dxdt = linalg.solve(M,b, overwrite_a=True, overwrite_b=True)
-            isneg = ((eigs <= 0).any() or min(eigs)/max(eigs) < minratio)
+            #print(eigs)
+            isneg = ((eigs <= -100).any() or min(eigs)/max(eigs) < minratio)
+            isneg = (eigs <= -100).any()
+            #if isneg:
+            #    print(eigs)
+            #    print(eigs <= -100)
+            #isneg = False
         except:
             dxdt = None
             isneg = False
@@ -125,6 +132,7 @@ def traceMinimum(f, d2f_dxdt, d2f_dx2, x0, t0, tstop, dtstart, deltaX_target,
     xeps = deltaX_target * 1e-2
 
     def fmin(x,t):
+        return optimize.minimize(f, x, args=(t,), method='L-BFGS-B', jac=df_dx, options={'maxiter':20000, 'maxcor':20, 'gtol':1e-9})['x']
         return optimize.fmin(f, x, args=(t,), xtol=xeps, ftol=np.inf,
                              disp=False)
     deltaX_tol = deltaX_tol * deltaX_target
@@ -142,11 +150,14 @@ def traceMinimum(f, d2f_dxdt, d2f_dx2, x0, t0, tstop, dtstart, deltaX_target,
         # Get the values at the next step
         tnext = t+dt
         xnext = fmin(x+dxdt*dt, tnext)
+        #print(tnext)
+        #print(xnext)
         dxdt_next, negeig = dxmindt(xnext,tnext)
         if dxdt_next is None or negeig == True:
             # We got stuck on a saddle, so there must be a phase transition
             # there.
             dt *= .5
+            #print(dt)
             overX, overT = xnext, tnext
         else:
             # The step might still be too big if it's outside of our error
@@ -172,6 +183,7 @@ def traceMinimum(f, d2f_dxdt, d2f_dx2, x0, t0, tstop, dtstart, deltaX_target,
         if abs(dt) < abs(dtmin):
             # Found a transition! Or at least a point where the step is really
             # small.
+            #print('here')
             break
         if dt > 0 and t >= tstop or dt < 0 and t <= tstop:
             # Reached tstop, but we want to make sure we stop right at tstop.
@@ -282,7 +294,7 @@ class Phase:
         return s
 
 
-def traceMultiMin(f, d2f_dxdt, d2f_dx2,
+def traceMultiMin(f, df_dx, d2f_dxdt, d2f_dx2,
                   points, tLow, tHigh, deltaX_target,
                   dtstart=1e-3, tjump=1e-3, forbidCrit=None,
                   single_trace_args={}, local_min_args={}):
@@ -340,6 +352,7 @@ def traceMultiMin(f, d2f_dxdt, d2f_dx2,
     xeps = deltaX_target*1e-2
 
     def fmin(x,t):
+        return optimize.minimize(f, x, args=(t,), method='L-BFGS-B', jac=df_dx, options={'maxiter':20000, 'maxcor':20, 'gtol':1e-9})['x']
         return optimize.fmin(f, x+xeps, args=(t,), xtol=xeps*1e-3,
                              ftol=np.inf, disp=False)
     dtstart = dtstart * (tHigh-tLow)
@@ -380,7 +393,7 @@ def traceMultiMin(f, d2f_dxdt, d2f_dx2,
             oldNumPoints = len(nextPoint)
             if (t1 > tLow):
                 print("Tracing minimum down")
-                down_trace = traceMinimum(f, d2f_dxdt, d2f_dx2, x1,
+                down_trace = traceMinimum(f, df_dx, d2f_dxdt, d2f_dx2, x1,
                                           t1, tLow, -dt1, deltaX_target,
                                           **single_trace_args)
                 X_down, T_down, dXdT_down, nX, nT = down_trace
@@ -395,7 +408,7 @@ def traceMultiMin(f, d2f_dxdt, d2f_dx2,
                 dXdT_down = dXdT_down[::-1]
             if (t1 < tHigh):
                 print("Tracing minimum up")
-                up_trace = traceMinimum(f, d2f_dxdt, d2f_dx2, x1,
+                up_trace = traceMinimum(f, df_dx, d2f_dxdt, d2f_dx2, x1,
                                         t1, tHigh, +dt1, deltaX_target,
                                         **single_trace_args)
                 X_up, T_up, dXdT_up, nX, nT = up_trace
@@ -486,7 +499,7 @@ def _removeRedundantPhase(phases, removed_phase, redundant_with_phase):
     del phases[removed_phase.key]
 
 
-def removeRedundantPhases(f, phases, xeps=1e-5, diftol=1e-2):
+def removeRedundantPhases(f, df_dx, phases, xeps=1e-5, diftol=1e-2):
     """
     Remove redundant phases from a dictionary output by :func:`traceMultiMin`.
 
@@ -529,6 +542,7 @@ def removeRedundantPhases(f, phases, xeps=1e-5, diftol=1e-2):
     # same thing multiple times.
     # There's just no way this function is going to be the bottle neck.
     def fmin(x,t):
+        return optimize.minimize(f, x, args=(t,), method='L-BFGS-B', jac=df_dx, options={'maxiter':20000, 'maxcor':20, 'gtol':1e-9})['x']
         return np.array(optimize.fmin(f, x, args=(t,),
                         xtol=xeps, ftol=np.inf, disp=False))
     has_redundant_phase = True
